@@ -32,11 +32,27 @@ Decisions:
 - **Severity as an `IntEnum`.** Lets `>=` do the threshold comparison directly instead of a lookup table.
 - **Exit `2` for bad input.** Reserves `1` for "found something" — the same convention `grep` and most CI-friendly scanners use.
 
+## 2026-06-20 — Issues #3 / #4 / #5: parsers (requirements.txt, pyproject.toml, package-lock.json)
+
+Landed the three lockfile parsers as standalone, unit-tested modules under `src/dep_vuln_checker/parsers/`. None of them are wired into the CLI yet — that's deferred to #6 (OSV client), when there's actually something to look the parsed deps up against.
+
+- **requirements.txt** — handles `==`, `>=`, `~=`, `!=`, `<=`, `>`, `<`; strips `# comments` and `[extras]`; follows `-r other.txt` with cycle protection via a `seen` set; skips git+/url installs and `-e` editables with a stderr warning; ignores other CLI-style flags (`--index-url`, etc.).
+- **pyproject.toml** — `tomllib` on 3.11+, `tomli` fallback on 3.10 (added as a conditional dep); reads `[project.dependencies]` plus every group in `[project.optional-dependencies]`; strips extras and environment markers.
+- **package-lock.json** — walks the v2/v3 `packages` map; captures transitive deps via nested `node_modules/...` paths; handles scoped packages; rejects v1 with a clear `ValueError`; skips the empty-key root entry; de-dupes identical `(name, version)` across nesting levels.
+
+All three return the same shape: `list[(name, version_or_None)]`, exposed as `parsers.Dep`.
+
+Decisions:
+- **Shared `Dep` type alias in `parsers/__init__.py`.** One module, one return type — keeps the OSV client honest when it consumes all three.
+- **Three modules, not one switch.** Each parser has its own ugly edge cases (recursive `-r`, env markers, nested node_modules). A single mega-parser would be a soup. Dispatch by filename happens at the call site, not inside the parser.
+- **No CLI wiring yet.** Parsers don't print anything; the CLI currently just emits empty findings. Wiring them in without an actual vulnerability source would just be a glorified `pip list` — pointless on its own. The wire-up lands with #6.
+- **Conditional `tomli` dep instead of bumping min Python to 3.11.** Keeps the door open for users on 3.10 (still supported upstream); cost is one extra dep on old interpreters.
+- **`-e` editable installs treated as URL installs.** They're almost always pointing at a VCS URL anyway; lumping them under the same warning keeps the parser simple.
+- **`package-lock.json` v1 is a hard error, not a silent skip.** v1 stores the dep tree under `dependencies` instead of `packages` — silently returning `[]` would look like "no deps found", which is worse than telling the user we don't support it.
+- **No PEP 440 version normalization.** The version string in the lockfile is what's actually installed; the OSV client gets to decide what "matches" means.
+
 ## Open follow-ups (tracked as issues)
 
-- #3 parser: `requirements.txt`
-- #4 parser: `pyproject.toml` (PEP 621)
-- #5 parser: `package-lock.json`
 - #6 OSV.dev client with batching + local cache
 - #7 output formats: fill in real text / JSON / SARIF bodies
 - #8 GitHub Actions: lint + test workflow
