@@ -1,5 +1,7 @@
 # dep-vuln-checker
 
+[![CI](https://github.com/victor0302/dep-vuln-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/victor0302/dep-vuln-checker/actions/workflows/ci.yml)
+
 Check project dependency manifests for known vulnerabilities.
 
 ## Install
