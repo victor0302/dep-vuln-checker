@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 from .lockfiles import detect_lockfiles
+from .output import Finding, render_json, render_sarif, render_text
 from .severity import SEVERITY_CHOICES, Severity
 
 OUTPUT_CHOICES: tuple[str, ...] = ("text", "json", "sarif")
@@ -27,27 +27,29 @@ def build_parser() -> argparse.ArgumentParser:
         default="low",
         help="Minimum severity that causes a non-zero exit (default: low).",
     )
+    check.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI colors in text output.",
+    )
     return parser
 
 
-def _emit(findings: list[dict], output: str) -> str:
+def _emit(findings: list[Finding], output: str, *, color: bool) -> str:
     if output == "json":
-        return json.dumps({"findings": findings}, indent=2)
+        return render_json(findings)
     if output == "sarif":
-        return json.dumps(
-            {
-                "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-                "version": "2.1.0",
-                "runs": [{"tool": {"driver": {"name": "dep-vuln-checker"}}, "results": findings}],
-            },
-            indent=2,
-        )
-    if not findings:
-        return "No vulnerabilities found."
-    return "\n".join(f"- {f}" for f in findings)
+        return render_sarif(findings)
+    return render_text(findings, color=color)
 
 
-def run_check(path: Path, output: str, min_severity: Severity) -> int:
+def run_check(
+    path: Path,
+    output: str,
+    min_severity: Severity,
+    *,
+    color: bool = True,
+) -> int:
     if not path.is_dir():
         print(f"error: {path} is not a directory", file=sys.stderr)
         return 2
@@ -57,17 +59,29 @@ def run_check(path: Path, output: str, min_severity: Severity) -> int:
         print(f"No recognized lockfile under {path}; nothing to check.")
         return 0
 
-    findings: list[dict] = []
-    print(_emit(findings, output))
+    findings: list[Finding] = []
+    print(_emit(findings, output, color=color))
 
-    above_threshold = [f for f in findings if Severity.parse(f["severity"]) >= min_severity]
+    above_threshold = [f for f in findings if _severity_of(f) >= min_severity]
     return 1 if above_threshold else 0
+
+
+def _severity_of(finding: Finding) -> Severity:
+    try:
+        return Severity.parse(finding.severity)
+    except KeyError:
+        return Severity.NONE
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "check":
-        return run_check(Path(args.path), args.output, Severity.parse(args.min_severity))
+        return run_check(
+            Path(args.path),
+            args.output,
+            Severity.parse(args.min_severity),
+            color=not args.no_color,
+        )
     return 2
 
 
